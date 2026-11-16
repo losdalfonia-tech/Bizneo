@@ -1,7 +1,7 @@
 import {
   STEPS, MODES, KIND, mergeConfig, localParts, toMin, fromMin, fmtLocal, effectiveMode,
   buildPlan, dueStep, nextStep, missedBefore, workedMs, dayStatus, weekdayOf, dayHours,
-  hasLunch, goalMin, recalcSalida,
+  hasLunch, goalMin, recalcSalida, salidaFromRegistered,
 } from "./schedule.js";
 import { chronoAction, diagnose, checkSession, BizneoError, Session, offLabel, pageHints } from "./bizneo.js";
 import { sendMail, notifyOnce } from "./notify.js";
@@ -95,6 +95,7 @@ async function doPunch(env, cfg, day, step, source) {
     // done | simulated | already
     const iso = step === "entrada" && r.startedAt ? r.startedAt : now.toISOString();
     markDone(cfg, env, day, step, iso);
+    if (r.outcome !== "simulated") noteBizneo(cfg, env, day, r);
     if (r.outcome === "simulated") day.simulated = { ...(day.simulated || {}), [step]: true };
     const msg = {
       done: `${LABEL[step]} fichado a las ${fmtLocal(iso, tz(env))}`,
@@ -118,6 +119,18 @@ async function doPunch(env, cfg, day, step, source) {
         `A las ${hora} no se pudo fichar "${LABEL[step]}":\n\n${e.message}\n\n${extra}`);
     }
     return { ok: false, error: e.message, kind: e instanceof BizneoError ? e.kind : "error" };
+  }
+}
+
+// Guarda lo que Bizneo lleva registrado hoy y ajusta la hora de finalizar con ese dato.
+function noteBizneo(cfg, env, day, { state, registeredMin }) {
+  if (registeredMin == null || !state || state === "unknown") return;
+  const now = new Date();
+  day.bizneo = { state, registeredMin, at: now.toISOString() };
+  if ((state === "running" || state === "paused") && day.actual.entrada && !day.finished) {
+    const hours = dayHours(cfg.schedule, weekdayOf(day.date));
+    const s = salidaFromRegistered(hours, day.plan, day.actual, { registeredMin, state, atMin: localParts(now, tz(env)).minutes });
+    if (s) day.plan.salida = s;
   }
 }
 
@@ -236,9 +249,18 @@ function dayView(day, env, cfg) {
     actualIso: day.actual, skipped: day.skipped || {}, simulated: day.simulated || {},
     status: dayStatus(day), lastError: day.lastError || null, offReason: day.offReason ? offLabel(day.offReason) : null,
     next: nextStep(day), finished: day.finished,
-    workedMs: workedMs(day.actual, Date.now()),
+    workedMs: bizneoWorkedMs(day) ?? workedMs(day.actual, Date.now()),
+    bizneoMin: day.bizneo?.registeredMin ?? null,
     goalMin: goalMin(dayHours(cfg.schedule, weekdayOf(day.date))),
   };
+}
+
+// Tiempo de hoy según Bizneo (registrado + lo transcurrido desde que se leyó, si está en marcha).
+function bizneoWorkedMs(day) {
+  const b = day.bizneo;
+  if (!b || b.registeredMin == null) return null;
+  const running = b.state === "running" && !day.actual?.salida && !(day.actual?.pausa && !day.actual?.retorno);
+  return b.registeredMin * 60000 + (running ? Date.now() - Date.parse(b.at) : 0);
 }
 
 function addDays(date, n) {
@@ -406,6 +428,7 @@ async function handle(req, env) {
       if (st.state === "paused" && !day.actual.pausa) markDone(cfg, env, day, "pausa", nowIso);
       if (st.state === "running" && day.actual.pausa && !day.actual.retorno) markDone(cfg, env, day, "retorno", nowIso);
       if (st.state === "stopped" && day.actual.entrada && !day.actual.salida) markDone(cfg, env, day, "salida", nowIso);
+      noteBizneo(cfg, env, day, st);
       await saveDay(env, day);
       const txt = { stopped: "parado", running: "en marcha", paused: "en pausa" }[st.state] +
         (st.registeredMin != null ? ` · ${Math.floor(st.registeredMin / 60)}:${String(st.registeredMin % 60).padStart(2, "0")} registradas hoy` : "");

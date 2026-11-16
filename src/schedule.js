@@ -158,6 +158,19 @@ export function recalcSalida(hours, actual, tz = "Europe/Madrid") {
   return fromMin(toMin(fmtLocal(actual.entrada, tz)) + dur);
 }
 
+// Salida a partir de lo que Bizneo dice que llevas hoy ("registrado hoy"), que incluye
+// tramos anteriores del día (p. ej. si finalizaste y volviste a iniciar).
+// atMin: minuto local en que se leyó; state: running | paused.
+export function salidaFromRegistered(hours, plan, actual, { registeredMin, atMin, state }) {
+  if (!hours || registeredMin == null) return null;
+  let rest = goalMin(hours) - registeredMin;
+  if (hasLunch(hours) && plan?.pausa && plan?.retorno) {
+    if (state === "paused") rest += Math.max(0, toMin(plan.retorno) - atMin);
+    else if (!actual?.pausa && toMin(plan.pausa) >= atMin) rest += toMin(plan.retorno) - toMin(plan.pausa);
+  }
+  return fromMin(atMin + Math.max(0, rest));
+}
+
 export const stepsOf = (plan) => STEPS.filter((s) => plan?.[s]);
 const handled = (day, s) => Boolean(day.actual?.[s] || day.skipped?.[s]);
 

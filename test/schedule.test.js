@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_CONFIG, buildPlan, recalcSalida, dueStep, nextStep, missedBefore, workedMs, effectiveMode,
-  localParts, zonedToIso, mergeConfig, goalMin, toMin,
+  localParts, zonedToIso, mergeConfig, goalMin, toMin, salidaFromRegistered,
 } from "../src/schedule.js";
 
 const S = DEFAULT_CONFIG.schedule;
@@ -106,4 +106,16 @@ test("mergeConfig ignora la configuración antigua y conserva el horario por def
   assert.equal(c.bizneo.cookie, "a=1");
   assert.equal(c.bizneo.dryRun, true);
   assert.equal(c.bizneo.actions, undefined);
+});
+
+test("finalizar según lo registrado en Bizneo (con tramos anteriores en el día)", () => {
+  const plan = { entrada: "09:02", pausa: "14:31", retorno: "15:31", salida: "20:12" };
+  // 12:33, en marcha, 3:37 registradas, comida pendiente: 12:33 + 4:38 + 1:00
+  assert.equal(salidaFromRegistered(LJ, plan, { entrada: "x" }, { registeredMin: 217, atMin: toMin("12:33"), state: "running" }), "18:11");
+  // en pausa a las 15:00 con 5:00 registradas: vuelve 15:31 y quedan 3:15
+  assert.equal(salidaFromRegistered(LJ, plan, { entrada: "x", pausa: "y" }, { registeredMin: 300, atMin: toMin("15:00"), state: "paused" }), "18:46");
+  // tras la comida, 16:00 con 6:00: quedan 2:15
+  assert.equal(salidaFromRegistered(LJ, plan, { entrada: "x", pausa: "y", retorno: "z" }, { registeredMin: 360, atMin: toMin("16:00"), state: "running" }), "18:15");
+  // viernes sin comida: 10:00 con 2:00 → quedan 5:00
+  assert.equal(salidaFromRegistered(V, { entrada: "08:00", salida: "15:00" }, { entrada: "x" }, { registeredMin: 120, atMin: toMin("10:00"), state: "running" }), "15:00");
 });

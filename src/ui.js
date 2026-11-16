@@ -196,7 +196,7 @@ function tickTimer(){if(!S)return;const t=S.today,a=t.actualIso||{};
  const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60;
  $("#timer").textContent=[h,m,x].map(n=>String(n).padStart(2,"0")).join(":");
  const goal=(t.goalMin||1)*60000,pct=Math.min(100,Math.floor(ms/goal*100));
- $("#sub").textContent=t.goalMin?pct+"% · objetivo "+fmtHM(t.goalMin):"";$("#bar").style.width=(t.goalMin?pct:0)+"%";
+ $("#sub").textContent=t.goalMin?pct+"% · objetivo "+fmtHM(t.goalMin)+(t.bizneoMin!=null?" · total del día según Bizneo":""):"";$("#bar").style.width=(t.goalMin?pct:0)+"%";
 }
 setInterval(tickTimer,1000);
 

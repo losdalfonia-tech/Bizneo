@@ -329,7 +329,7 @@ export async function chronoAction(cfg, step, opts = {}) {
     if (step === "salida" && !c.registeredMin) {
       return result("skipped", "El cronómetro está parado y hoy no hay tiempo registrado: la jornada no se llegó a iniciar");
     }
-    return result("already", `Ya estaba hecho: el cronómetro está ${STATE_TXT[c.state]}`, { startedAt: c.startedAt });
+    return result("already", `Ya estaba hecho: el cronómetro está ${STATE_TXT[c.state]}`, { startedAt: c.startedAt, state: c.state, registeredMin: c.registeredMin });
   }
 
   // ¿Se puede hacer desde el estado actual?
@@ -349,7 +349,7 @@ export async function chronoAction(cfg, step, opts = {}) {
     return result("skipped", "El cronómetro está parado: la jornada no está iniciada");
   }
   if (step === "retorno" && c.state === "running") {
-    return result("already", "El cronómetro ya está en marcha");
+    return result("already", "El cronómetro ya está en marcha", { state: c.state, registeredMin: c.registeredMin });
   }
 
   // Petición
@@ -396,7 +396,7 @@ export async function chronoAction(cfg, step, opts = {}) {
   if (after.state !== TARGET[step]) {
     throw new BizneoError(`Bizneo no ha cambiado el estado: el cronómetro sigue ${STATE_TXT[after.state]}`, "verify");
   }
-  return result("done", `Hecho (${desc})`, { startedAt: after.startedAt });
+  return result("done", `Hecho (${desc})`, { startedAt: after.startedAt, state: after.state, registeredMin: after.registeredMin });
 }
 
 const fmtReg = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")} h`;

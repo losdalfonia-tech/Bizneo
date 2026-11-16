@@ -13,6 +13,13 @@ export function page(state, { reg = "0:00", cal = CAL } = {}) {
 export function fakeBizneo({ state = "stopped", reg = "0:00", cal, setCookie, ignoreWrites = false, lazy = false } = {}) {
   const calls = [];
   let started = null; // "YYYY-MM-DD HH:MM:SS" en Madrid, cuando se inicia de verdad
+  let acc = 0; // ms trabajados en tramos cerrados
+  let since = null; // inicio del tramo en marcha
+  const regTxt = () => {
+    if (!started) return state === "stopped" ? reg : "2:11";
+    const m = Math.max(1, Math.floor((acc + (state === "running" ? Date.now() - since : 0)) / 60000));
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  };
   const self = {
     calls,
     get state() { return state; },
@@ -25,7 +32,7 @@ export function fakeBizneo({ state = "stopped", reg = "0:00", cal, setCookie, ig
       if (setCookie) headers.append("set-cookie", setCookie);
       const render = () => {
         // tras finalizar, Bizneo muestra lo registrado en el día
-        let html = page(state, { reg: state !== "stopped" ? "2:11" : started ? "8:15" : reg, cal });
+        let html = page(state, { reg: regTxt(), cal }).replace("<b>2:11</b>", `<b>${regTxt()}</b>`);
         if (started) html = html.replace("2026-11-16 10:57:57", started);
         return html;
       };
@@ -44,14 +51,17 @@ export function fakeBizneo({ state = "stopped", reg = "0:00", cal, setCookie, ig
       if (!ignoreWrites) {
         if (method === "POST" && u.pathname === "/chrono") {
           state = "running";
+          since = Date.now();
           const p = localParts(new Date());
           started = `${p.date} ${String(p.hh).padStart(2, "0")}:${String(p.mm).padStart(2, "0")}:${String(p.ss).padStart(2, "0")}`;
         }
         if (method === "PUT" && u.pathname === "/chrono/1000") {
           const p = new URLSearchParams(init.body);
-          if (state === "paused") state = "running";
-          else if (p.get("pause")) state = "paused";
-          else state = "stopped";
+          if (state === "paused") { state = "running"; since = Date.now(); }
+          else {
+            if (state === "running" && since) acc += Date.now() - since;
+            state = p.get("pause") ? "paused" : "stopped";
+          }
         }
       }
       return new Response("<div id=chronometer-wrapper></div>", { status: 200, headers });
