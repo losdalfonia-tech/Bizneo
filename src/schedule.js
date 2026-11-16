@@ -172,7 +172,7 @@ export function salidaFromRegistered(hours, plan, actual, { registeredMin, atMin
 }
 
 export const stepsOf = (plan) => STEPS.filter((s) => plan?.[s]);
-const handled = (day, s) => Boolean(day.actual?.[s] || day.skipped?.[s]);
+const handled = (day, s) => Boolean(day.actual?.[s] || day.skipped?.[s] || day.simulated?.[s]);
 
 // Siguiente paso pendiente según lo ya fichado u omitido.
 export function nextStep(day) {

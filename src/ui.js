@@ -186,7 +186,7 @@ function render(){
  $("#steps").className="steps n"+steps.length;
  $("#steps").innerHTML=steps.map(k=>{const a=t.actual[k],p=t.plan&&t.plan[k];
   const sk=t.skipped[k];
-  return '<div class="step '+(a?"done":t.next===k?"next":"")+'"'+(sk?' title="'+esc(sk)+'"':'')+'><label>'+LABEL[k]+'</label><span>'+(a?a+(t.simulated[k]?" 🧪":""):sk?"omitido":p?"≈ "+p:"—")+'</span></div>'}).join("");
+  return '<div class="step '+(a?"done":t.next===k?"next":"")+'"'+(sk?' title="'+esc(sk)+'"':'')+'><label>'+LABEL[k]+'</label><span>'+(a?a:t.simulated[k]?"🧪 "+t.simulated[k]:sk?"omitido":p?"≈ "+p:"—")+'</span></div>'}).join("");
  renderToday();renderWeek();renderCal();renderLog();tickTimer();
 }
 

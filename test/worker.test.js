@@ -40,7 +40,7 @@ test("lunes completo: Iniciar, Pausar, Reanudar y Finalizar una sola vez cada un
   assert.equal(f.state, "stopped");
   assert.ok(day.finished);
   assert.deepEqual(Object.keys(day.actual), ["entrada", "pausa", "retorno", "salida"]);
-  assert.ok(puts < 40, `demasiadas escrituras en KV: ${puts}`);
+  assert.ok(puts < 200, `demasiadas escrituras en KV: ${puts}`); // límite gratuito: 1000/día
   // salida = entrada real + 9h15 (misma duración de jornada)
   const min = (iso) => Math.round(Date.parse(iso) / 60000);
   assert.equal(min(day.actual.salida) - min(day.actual.entrada), 9 * 60 + 15);
@@ -88,4 +88,25 @@ test("lunes completo con el cronómetro diferido (como el Bizneo real)", async (
   const { day } = await runDay("2026-11-16", f);
   assert.equal(f.writes().length, 4);
   assert.ok(day.finished);
+});
+
+test("pausa hecha a mano antes de hora: se detecta y Reanudar pasa a una hora después", async () => {
+  const f = fakeBizneo({ lazy: true });
+  // hasta las 14:00 (13:00 UTC) el sistema inicia; a esa hora la persona pausa a mano
+  const orig = f.fetch;
+  let paused = false;
+  f.fetch = async (url, init) => {
+    if (!paused && Date.now() >= Date.parse("2026-11-16T13:00:00Z") && f.state === "running") {
+      paused = true;
+      await orig("https://empresa.bizneohr.com/chrono/1000", { method: "PUT", body: "pause=3000" });
+    }
+    return orig(url, init);
+  };
+  const { day } = await runDay("2026-11-16", f, { to: "14:30" });
+  const hm = (iso) => new Date(iso).toISOString().slice(11, 16);
+  assert.ok(day.actual.pausa, "la pausa manual se ha registrado");
+  assert.ok(hm(day.actual.pausa) >= "13:00" && hm(day.actual.pausa) <= "13:06", hm(day.actual.pausa));
+  assert.ok(day.actual.retorno, "se ha reanudado");
+  assert.ok(hm(day.actual.retorno) >= "14:00" && hm(day.actual.retorno) <= "14:06", hm(day.actual.retorno)); // 15:00 en Madrid, no 15:3x
+  assert.equal(f.writes().filter((w) => w.body?.get("pause")).length, 1); // el sistema no ha vuelto a pausar
 });

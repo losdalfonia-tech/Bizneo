@@ -94,9 +94,13 @@ async function doPunch(env, cfg, day, step, source) {
     }
     // done | simulated | already
     const iso = step === "entrada" && r.startedAt ? r.startedAt : now.toISOString();
-    markDone(cfg, env, day, step, iso);
-    if (r.outcome !== "simulated") noteBizneo(cfg, env, day, r);
-    if (r.outcome === "simulated") day.simulated = { ...(day.simulated || {}), [step]: true };
+    if (r.outcome === "simulated") {
+      // modo prueba: se apunta aparte para no mezclarlo con lo fichado de verdad
+      day.simulated = { ...(day.simulated || {}), [step]: iso };
+    } else {
+      markDone(cfg, env, day, step, iso);
+      noteBizneo(cfg, env, day, r);
+    }
     const msg = {
       done: `${LABEL[step]} fichado a las ${fmtLocal(iso, tz(env))}`,
       simulated: `${LABEL[step]} (simulado) · ${r.msg}`,
@@ -134,6 +138,29 @@ function noteBizneo(cfg, env, day, { state, registeredMin }) {
   }
 }
 
+// Lee el cronómetro real y ajusta el día: registra pausas o finales hechos a mano y
+// recalcula la hora de finalizar con lo registrado en Bizneo.
+async function syncDay(env, cfg, day) {
+  const s = new Session(clientCfg(cfg, env), env.__fetch);
+  const { home: page, chrono: st } = await s.load();
+  await persistCookie(env, { cookie: s.cookie, sessionExpires: s.sessionExpires });
+  if (st.state === "unknown") {
+    await kv.put(env, "debug:last", { at: new Date().toISOString(), hints: pageHints(page, s.lastStatus) }, 60 * 60 * 24 * 7);
+    throw new BizneoError(`${st.reason || "No reconozco el estado del cronómetro"} (detalles guardados para revisar)`, "parse");
+  }
+  const nowIso = new Date().toISOString();
+  if ((st.state === "running" || st.state === "paused") && !day.actual.entrada) markDone(cfg, env, day, "entrada", st.startedAt || nowIso);
+  if (st.state === "paused" && !day.actual.pausa) markDone(cfg, env, day, "pausa", nowIso);
+  if (st.state === "running" && day.actual.pausa && !day.actual.retorno) markDone(cfg, env, day, "retorno", nowIso);
+  if (st.state === "stopped" && day.actual.entrada && !day.actual.salida) markDone(cfg, env, day, "salida", nowIso);
+  noteBizneo(cfg, env, day, st);
+  const txt = { stopped: "parado", running: "en marcha", paused: "en pausa" }[st.state] +
+    (st.registeredMin != null ? ` · ${Math.floor(st.registeredMin / 60)}:${String(st.registeredMin % 60).padStart(2, "0")} registradas hoy` : "");
+  return { state: st.state, txt };
+}
+
+const SYNC_EVERY_MS = 5 * 60_000;
+
 function markDone(cfg, env, day, step, iso) {
   day.actual[step] = iso;
   delete day.skipped[step];
@@ -142,6 +169,11 @@ function markDone(cfg, env, day, step, iso) {
     // la salida se recalcula a partir de la entrada real (y de la comida real)
     const s = recalcSalida(hours, day.actual, tz(env));
     if (s) day.plan.salida = s;
+  }
+  if (step === "pausa" && hasLunch(hours) && !day.actual.retorno) {
+    // la vuelta se programa a una comida completa desde la pausa real
+    day.plan.retorno = fromMin(toMin(fmtLocal(iso, tz(env))) + toMin(hours.retorno) - toMin(hours.pausa));
+    delete day.skipped.retorno;
   }
   if (step === "salida") day.finished = true;
 }
@@ -162,6 +194,19 @@ async function tick(env) {
     // reintenta como mucho cada 5 min y hasta MAX_RETRIES veces
     if (tries < MAX_RETRIES && Date.now() - last > 5 * 60_000) {
       await doPunch(env, cfg, day, step, "auto");
+    }
+  }
+  // Durante la jornada, cada 5 min se lee el estado real (detecta pausas o finales manuales)
+  else if (cfg.bizneo.cookie && day.mode !== "libre" && !day.finished && day.plan?.entrada &&
+    lp.minutes >= toMin(day.plan.entrada) - 15 && lp.minutes <= toMin(day.plan.salida) + 30 &&
+    Date.now() - Date.parse(day.bizneo?.at || 0) >= SYNC_EVERY_MS) {
+    try {
+      await syncDay(env, cfg, day);
+      delete day.syncError;
+    } catch (e) {
+      day.bizneo = { ...(day.bizneo || {}), at: new Date().toISOString() }; // no reintentar cada minuto
+      if (day.syncError !== e.message) await addLog(env, { type: "warn", source: "sync", msg: `Lectura automática: ${e.message}` });
+      day.syncError = e.message;
     }
   }
   // KV gratuito: 1000 escrituras/día → sólo se guarda el día si ha cambiado
@@ -246,7 +291,8 @@ function dayView(day, env, cfg) {
   for (const s of STEPS) actual[s] = fmtLocal(day.actual?.[s], tz(env));
   return {
     date: day.date, mode: day.mode, override: day.override, plan: day.plan, actual,
-    actualIso: day.actual, skipped: day.skipped || {}, simulated: day.simulated || {},
+    actualIso: day.actual, skipped: day.skipped || {},
+    simulated: Object.fromEntries(Object.entries(day.simulated || {}).map(([k, v]) => [k, typeof v === "string" ? fmtLocal(v, tz(env)) : "✓"])),
     status: dayStatus(day), lastError: day.lastError || null, offReason: day.offReason ? offLabel(day.offReason) : null,
     next: nextStep(day), finished: day.finished,
     workedMs: bizneoWorkedMs(day) ?? workedMs(day.actual, Date.now()),
@@ -409,31 +455,15 @@ async function handle(req, env) {
     // Leer el estado real del cronómetro y ajustar el panel
     case "/api/sync": {
       const day = await getDay(env, cfg, lp.date);
-      let st;
       try {
-        const s = new Session(clientCfg(cfg, env), env.__fetch);
-        const { home: page, chrono } = await s.load();
-        st = chrono;
-        await persistCookie(env, { cookie: s.cookie, sessionExpires: s.sessionExpires });
-        if (st.state === "unknown") {
-          await kv.put(env, "debug:last", { at: new Date().toISOString(), hints: pageHints(page, s.lastStatus) }, 60 * 60 * 24 * 7);
-          throw new BizneoError(`${st.reason || "No reconozco el estado del cronómetro"} (detalles guardados para revisar)`, "parse");
-        }
+        const st = await syncDay(env, cfg, day);
+        await saveDay(env, day);
+        await addLog(env, { type: "ok", source: "sync", msg: `Cronómetro de Bizneo: ${st.txt}` });
+        return json({ ok: true, state: st.state, msg: `Cronómetro: ${st.txt}` });
       } catch (e) {
         await addLog(env, { type: "error", source: "sync", msg: e.message });
         return json({ ok: false, error: e.message }, 502);
       }
-      const nowIso = new Date().toISOString();
-      if ((st.state === "running" || st.state === "paused") && !day.actual.entrada) markDone(cfg, env, day, "entrada", st.startedAt || nowIso);
-      if (st.state === "paused" && !day.actual.pausa) markDone(cfg, env, day, "pausa", nowIso);
-      if (st.state === "running" && day.actual.pausa && !day.actual.retorno) markDone(cfg, env, day, "retorno", nowIso);
-      if (st.state === "stopped" && day.actual.entrada && !day.actual.salida) markDone(cfg, env, day, "salida", nowIso);
-      noteBizneo(cfg, env, day, st);
-      await saveDay(env, day);
-      const txt = { stopped: "parado", running: "en marcha", paused: "en pausa" }[st.state] +
-        (st.registeredMin != null ? ` · ${Math.floor(st.registeredMin / 60)}:${String(st.registeredMin % 60).padStart(2, "0")} registradas hoy` : "");
-      await addLog(env, { type: "ok", source: "sync", msg: `Cronómetro de Bizneo: ${txt}` });
-      return json({ ok: true, state: st.state, msg: `Cronómetro: ${txt}` });
     }
     // Recalcular el plan de hoy (nuevo desfase)
     case "/api/replan": {
