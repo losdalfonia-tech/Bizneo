@@ -3,7 +3,7 @@ import {
   buildPlan, dueStep, nextStep, missedBefore, workedMs, dayStatus, weekdayOf, dayHours,
   hasLunch, goalMin, recalcSalida,
 } from "./schedule.js";
-import { chronoAction, diagnose, checkSession, BizneoError, Session, parseChrono, offLabel } from "./bizneo.js";
+import { chronoAction, diagnose, checkSession, BizneoError, Session, parseChrono, offLabel, pageHints } from "./bizneo.js";
 import { sendMail, notifyOnce } from "./notify.js";
 import { loginPage, dashboardPage, settingsPage } from "./ui.js";
 
@@ -390,8 +390,13 @@ async function handle(req, env) {
       let st;
       try {
         const s = new Session(clientCfg(cfg, env), env.__fetch);
-        st = parseChrono(await s.home());
+        const page = await s.home();
+        st = parseChrono(page);
         await persistCookie(env, { cookie: s.cookie, sessionExpires: s.sessionExpires });
+        if (st.state === "unknown") {
+          await kv.put(env, "debug:last", { at: new Date().toISOString(), hints: pageHints(page, s.lastStatus) }, 60 * 60 * 24 * 7);
+          throw new BizneoError(`${st.reason || "No reconozco el estado del cronómetro"} (detalles guardados para revisar)`, "parse");
+        }
       } catch (e) {
         await addLog(env, { type: "error", source: "sync", msg: e.message });
         return json({ ok: false, error: e.message }, 502);
@@ -402,7 +407,8 @@ async function handle(req, env) {
       if (st.state === "running" && day.actual.pausa && !day.actual.retorno) markDone(cfg, env, day, "retorno", nowIso);
       if (st.state === "stopped" && day.actual.entrada && !day.actual.salida) markDone(cfg, env, day, "salida", nowIso);
       await saveDay(env, day);
-      const txt = { stopped: "parado", running: "en marcha", paused: "en pausa", unknown: "desconocido" }[st.state];
+      const txt = { stopped: "parado", running: "en marcha", paused: "en pausa" }[st.state] +
+        (st.registeredMin != null ? ` · ${Math.floor(st.registeredMin / 60)}:${String(st.registeredMin % 60).padStart(2, "0")} registradas hoy` : "");
       await addLog(env, { type: "ok", source: "sync", msg: `Cronómetro de Bizneo: ${txt}` });
       return json({ ok: true, state: st.state, msg: `Cronómetro: ${txt}` });
     }
@@ -466,6 +472,7 @@ async function handle(req, env) {
       try {
         const d = await diagnose(clientCfg(cfg, env), lp.date);
         await persistCookie(env, d);
+        if (d.hints) await kv.put(env, "debug:last", { at: new Date().toISOString(), hints: d.hints }, 60 * 60 * 24 * 7);
         delete d.cookie;
         const msg = d.ok
           ? `Diagnóstico: cronómetro ${d.stateTxt}` + (d.today ? `, hoy ${d.today.off ? offLabel(d.today.off) : "laborable"}` : ", día no encontrado en el calendario")

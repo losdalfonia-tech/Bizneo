@@ -210,6 +210,7 @@ export class Session {
       redirect: "manual",
     });
     const body = await res.text();
+    this.lastStatus = res.status;
     if (looksLikeLogin(res, body)) throw new BizneoError("La sesión de Bizneo ha caducado", "session");
     const sc = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
     if (sc.length) {
@@ -357,6 +358,22 @@ export async function chronoAction(cfg, step, opts = {}) {
 
 const fmtReg = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")} h`;
 
+/** Estructura de una página (sin textos ni valores) para depurar cuando no se encuentra el cronómetro. */
+export function pageHints(html, status) {
+  const uniq = (a) => [...new Set(a)].slice(0, 25);
+  const tags = [...(html || "").matchAll(/<(form|div|section|turbo-frame|span|a|button)\b[^>]*>/gi)].map((m) => attrsOf(m[0]));
+  return {
+    status,
+    length: (html || "").length,
+    title: ((html || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").trim().slice(0, 80),
+    csrfMeta: /name="csrf-token"/i.test(html || ""),
+    lazy: uniq(tags.filter((a) => /load|revealed|intersect/.test(a["hx-trigger"] || "")).map((a) => `${a["hx-get"] || a["hx-post"] || "?"} [${a["hx-trigger"]}]`)),
+    chrono: uniq(tags.flatMap((a) => Object.entries(a).filter(([k, v]) => /chrono/i.test(v) && !/csrf/i.test(k)).map(([k, v]) => `${k}=${v.slice(0, 80)}`))),
+    forms: uniq(tags.filter((a) => a.action || a["hx-post"] || a["hx-put"]).map((a) => `${a.id || ""} ${a["hx-put"] || a["hx-post"] || a.action}`)),
+    ids: uniq(tags.map((a) => a.id).filter((id) => id && /chrono|hub|main/i.test(id))),
+  };
+}
+
 /** Diagnóstico sin fichar: estado del cronómetro, opciones y cómo ve Bizneo el día. */
 export async function diagnose(cfg, date) {
   const session = new Session(cfg, cfg.fetchImpl);
@@ -377,6 +394,7 @@ export async function diagnose(cfg, date) {
     cookie: session.cookie,
     sessionExpires: session.sessionExpires,
     reason: c.reason,
+    hints: c.state === "unknown" ? pageHints(html, session.lastStatus) : undefined,
   };
 }
 
