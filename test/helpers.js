@@ -57,7 +57,12 @@ export function fakeBizneo({ state = "stopped", reg = "0:00", cal, setCookie, ig
         }
         if (method === "PUT" && u.pathname === "/chrono/1000") {
           const p = new URLSearchParams(init.body);
-          if (state === "paused") { state = "running"; since = Date.now(); }
+          if (state === "paused") {
+            state = "running";
+            since = Date.now();
+            const p = localParts(new Date()); // como Bizneo: el cronómetro cuenta desde la reanudación
+            started = `${p.date} ${String(p.hh).padStart(2, "0")}:${String(p.mm).padStart(2, "0")}:${String(p.ss).padStart(2, "0")}`;
+          }
           else {
             if (state === "running" && since) acc += Date.now() - since;
             state = p.get("pause") ? "paused" : "stopped";

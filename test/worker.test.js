@@ -110,3 +110,32 @@ test("pausa hecha a mano antes de hora: se detecta y Reanudar pasa a una hora de
   assert.ok(hm(day.actual.retorno) >= "14:00" && hm(day.actual.retorno) <= "14:06", hm(day.actual.retorno)); // 15:00 en Madrid, no 15:3x
   assert.equal(f.writes().filter((w) => w.body?.get("pause")).length, 1); // el sistema no ha vuelto a pausar
 });
+
+test("total del día al segundo: tramos cerrados + tramo en marcha desde su hora exacta", async () => {
+  const f = fakeBizneo({ lazy: true });
+  const { day } = await runDay("2026-11-16", f, { to: "12:00" }); // iniciado 09:0x, leído cada 5 min
+  const b = day.bizneo;
+  assert.equal(b.state, "running");
+  assert.ok(b.segFrom && b.closedMs != null);
+  // a las 13:00 de Madrid, el total ≈ 13:00 - inicio real, sin errores de redondeo acumulados
+  const total = b.closedMs + (Date.parse("2026-11-16T12:00:00Z") - Date.parse(b.segFrom));
+  const exact = Date.parse("2026-11-16T12:00:00Z") - Date.parse(day.actual.entrada);
+  assert.ok(Math.abs(total - exact) < 60_000, `${total} vs ${exact}`);
+});
+
+test("si data-from no es el tramo actual, no se fía de él (no finaliza antes de tiempo)", async () => {
+  const f = fakeBizneo();
+  const orig = f.fetch;
+  // simula un Bizneo que, tras reanudar, sigue mostrando la hora de inicio de la mañana
+  let first = null;
+  f.fetch = async (url, init) => {
+    const r = await orig(url, init);
+    const html = await r.text();
+    const m = html.match(/data-from="([^"]+)"/);
+    if (m && !first) first = m[1];
+    return new Response(first ? html.replace(/data-from="[^"]+"/, `data-from="${first}"`) : html, { status: r.status, headers: r.headers });
+  };
+  const { day } = await runDay("2026-11-16", f);
+  const min = (iso) => Math.round(Date.parse(iso) / 60000);
+  assert.equal(min(day.actual.salida) - min(day.actual.entrada), 9 * 60 + 15);
+});

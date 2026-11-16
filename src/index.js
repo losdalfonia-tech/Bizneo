@@ -127,13 +127,23 @@ async function doPunch(env, cfg, day, step, source) {
 }
 
 // Guarda lo que Bizneo lleva registrado hoy y ajusta la hora de finalizar con ese dato.
-function noteBizneo(cfg, env, day, { state, registeredMin }) {
+// "registrado hoy" viene sin segundos; el tramo en marcha sí tiene hora exacta de inicio
+// (data-from), así que: total = tramos cerrados + tramo actual al segundo.
+function noteBizneo(cfg, env, day, { state, registeredMin, startedAt }) {
   if (registeredMin == null || !state || state === "unknown") return;
   const now = new Date();
   day.bizneo = { state, registeredMin, at: now.toISOString() };
+  let workedMin = registeredMin;
+  const segMs = startedAt ? now - Date.parse(startedAt) : NaN;
+  // protección: si el "tramo" dura más que todo lo registrado, data-from no es el tramo actual
+  if (state === "running" && segMs >= 0 && segMs / 60000 <= registeredMin + 1) {
+    const closedMs = Math.max(0, (registeredMin - Math.floor(segMs / 60000)) * 60000);
+    Object.assign(day.bizneo, { closedMs, segFrom: startedAt });
+    workedMin = (closedMs + segMs) / 60000;
+  }
   if ((state === "running" || state === "paused") && day.actual.entrada && !day.finished) {
     const hours = dayHours(cfg.schedule, weekdayOf(day.date));
-    const s = salidaFromRegistered(hours, day.plan, day.actual, { registeredMin, state, atMin: localParts(now, tz(env)).minutes });
+    const s = salidaFromRegistered(hours, day.plan, day.actual, { registeredMin: workedMin, state, atMin: localParts(now, tz(env)).minutes });
     if (s) day.plan.salida = s;
   }
 }
@@ -305,7 +315,8 @@ function dayView(day, env, cfg) {
 function bizneoWorkedMs(day) {
   const b = day.bizneo;
   if (!b || b.registeredMin == null) return null;
-  const running = b.state === "running" && !day.actual?.salida && !(day.actual?.pausa && !day.actual?.retorno);
+  const running = b.state === "running" && !day.actual?.salida;
+  if (running && b.segFrom != null && b.closedMs != null) return b.closedMs + (Date.now() - Date.parse(b.segFrom));
   return b.registeredMin * 60000 + (running ? Date.now() - Date.parse(b.at) : 0);
 }
 
