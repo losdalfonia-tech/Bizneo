@@ -19,3 +19,5 @@ crons = ["* * * * *"]
 # Secretos (NO van en este fichero):
 #   npx wrangler secret put APP_PASSWORD     -> contraseña para entrar al panel
 #   npx wrangler secret put SESSION_SECRET   -> cadena aleatoria larga para firmar la cookie del panel
+#   npx wrangler secret put RESEND_API_KEY   -> clave de Resend para los avisos por correo
+# Opcional (en [vars]): MAIL_FROM = "Fichaje <avisos@tudominio.com>" si verificas un dominio en Resend

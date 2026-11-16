@@ -1,0 +1,30 @@
+<html><body><div id="chronometer-wrapper">
+<form action="/chrono/1000" method="post" id="chrono-form-default_chrono" class="chronometer" hx-trigger="submit" hx-fragment="#chronometer-wrapper" hx-push-url="false" hx-put="/chrono/1000" hx-request-geo="" hx-target="#chronometer-wrapper" hx-select="#chronometer-wrapper" hx-swap="outerHTML">
+  <input name="_method" type="hidden" hidden="" value="put">
+  <input name="_csrf_token" type="hidden" hidden="" value="CSRF-DEF">
+  <input type="hidden" name="location_id" id="chrono-form-default_chrono_location_id" value="">
+  <div id="chrono-poll" hx-get="/chrono/1000?location_id=" hx-trigger="every 60s"><div class="chrono-toggle-wrap"><div class="my-4 text-center"><div>
+    <p class="h1"><span class="ml-1" data-timer="" data-from="2026-11-16 10:57:57" data-time-zone="Europe/Madrid"><span class="timer-time-hours-minutes">00:00</span></span></p>
+    <div class="row time"><span class="tag is-white is-medium"><p class="mb-0 is-underlined" data-tooltip=""><b>2:11</b></p><p class="text-secondary mb-0 !ml-1">registrado hoy</p></span></div>
+  </div></div>
+  <input type="hidden" name="shift_id" id="chrono-form-default_chrono_shift_id" value="2000">
+  <div class="actions-row">
+    <input type="hidden" name="kind" id="chrono-form-default_chrono_kind" value="rest">
+    <div class="dropdown col-6"><div class="dropdown-trigger"><a class="button secondary w-full"><i class="huge-icon"></i>Pausar</a></div>
+      <div class="dropdown-menu auto">
+        <button type="submit" class="button is-link" name="pause" value="3000" form="chrono-form-default_chrono" data-gtm-action="chrono pause" data-gtm-category="chrono" data-gtm-value="3000">
+          <i class="huge-icon huge-dish-02-stroke-rounded"></i>
+          Comida | 60 min Regulariz.
+        </button>
+      </div></div>
+    <div class="col-6"><button type="submit" class="button danger-outline w-full" data-gtm-action="chrono stop" data-gtm-category="chrono" data-gtm-value="0">
+      <i class="huge-icon huge-stop-stroke-rounded"></i>
+      Finalizar
+    </button></div>
+  </div></div>
+  <div class="chrono-toggle-wrap !hidden"><div class="form-group "><textarea id="chrono-form-default_chrono_comment" name="comment" class="form-control " placeholder="Comentario" autofocus="true"></textarea></div>
+    <button type="button" class="button is-link back" data-toggle-show=".chrono-toggle-wrap">Volver</button></div>
+  </div>
+</form></div>
+__CAL__
+</body></html>

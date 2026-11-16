@@ -1,0 +1,21 @@
+<html><head><meta name="csrf-token" content="META-TOKEN"></head><body><div id="chronometer-wrapper">
+<form action="/chrono" method="post" id="chrono-form-default_chrono" class="chronometer" hx-fragment="#chronometer-wrapper" hx-trigger="submit" hx-post="/chrono" hx-push-url="false" hx-request-geo="" hx-target="#chronometer-wrapper" hx-select="#chronometer-wrapper" hx-swap="outerHTML">
+  <input name="_csrf_token" type="hidden" hidden="" value="CSRF-ABC">
+  <input type="hidden" name="location_id" id="chrono-form-default_chrono_location_id" value="">
+  <input type="hidden" name="user_id" id="chrono-form-default_chrono_user_id" value="1000">
+  <div class="chrono-toggle-wrap"><div class="my-4 text-center"><div id="time-row"><p class="h1 text-secondary time grow !mb-0">
+    <span class="ml-1"><span class="timer-time-hours-minutes">00:00</span><span class="timer-time-seconds text-secondary">00</span></span></p></div>
+    <div class="row time"><p data-tooltip="" data-get-from="#dropdown-tooltip" data-size="small" class="is-underlined"><b>__REG__</b></p><p class="text-secondary !ml-1">registrado hoy</p></div>
+  </div>
+  <input type="hidden" name="shift_id" id="chrono-form-default_chrono_shift_id" value="2000">
+  <div class="actions-row"><div class="telework-col"><div class="buttons-group">
+    <div class="form-radio "><input type="radio" id="x_working_time" name="kind" value="working_time" checked="" autocomplete="off" hx-get="/chrono/1000" hx-trigger="click"><label for="x_working_time">o</label></div>
+    <div class="form-radio "><input type="radio" id="x_telework" name="kind" value="telework" autocomplete="off" hx-get="/chrono/1000" hx-trigger="click"><label for="x_telework">c</label></div>
+  </div></div>
+  <button type="submit" class="button primary w-full" data-gtm-category="chrono" data-gtm-action="chrono start" data-chronostart="">
+    <i class="huge-icon huge-play-stroke-standard is-xsmall text-current"></i>
+    Iniciar
+  </button></div></div>
+</form></div>
+__CAL__
+</body></html>

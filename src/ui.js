@@ -81,9 +81,12 @@ textarea{width:100%;font-family:var(--mono);font-size:13px;min-height:70px;resiz
 .toast.show{opacity:1}
 .form{display:grid;gap:16px}.form label{display:grid;gap:6px;font-size:14px;color:var(--muted)}.form label>span{font-weight:500;color:var(--text)}
 .fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}
+.fields input,.fields select{width:100%;min-width:0}
 .hint{font-size:13px;color:var(--soft)}
 .act{border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:10px}
 .act-h{display:flex;gap:10px;align-items:center}.act-h b{min-width:80px}.act-h input{flex:1}
+.sched{border-collapse:collapse;width:100%;min-width:640px}.sched th{text-align:left;font-size:13px;color:var(--soft);font-weight:600;padding:6px}.sched td{padding:4px 6px;border-top:1px solid var(--line)}
+.diag{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:13px;white-space:pre-wrap;margin:0}
 code{font-family:var(--mono);font-size:13px;background:var(--bg);padding:1px 5px;border-radius:5px}
 ol.howto{margin:0;padding-left:20px;color:var(--muted);display:grid;gap:6px}
 .login{min-height:100vh;display:grid;place-items:center;padding:16px}
@@ -110,18 +113,18 @@ const toMin=s=>{const[a,b]=s.split(":").map(Number);return a*60+b};
 const fromMin=m=>{m=((Math.round(m)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0")};
 function header(cfg){
  const p=cfg.profile||{},s=cfg.schedule,b=cfg.bizneo;
- const comida=s.comida?toMin(s.retorno)-toMin(s.pausa):0;
- const fin=fromMin(toMin(s.entrada)+s.objetivoMin+comida);
+ const wd=(new Date().getDay()+6)%7+1,h=s.days[wd];
  let cls="err",txt="sin sesión";
  if(b.hasCookie){const d=b.cookieExpiresAt?Math.floor((Date.parse(b.cookieExpiresAt)-Date.now())/864e5):null;
-  if(d===null){cls="ok";txt="activa"}else if(d<0){cls="err";txt="caducada"}else{cls=d<3?"warn":"ok";txt=d+" d"}}
+  if(d===null){cls="ok";txt="activa"}else if(d<0){cls="err";txt="caducada"}else{cls=d<=(cfg.alerts?.daysBefore??5)?"warn":"ok";txt=d+" d"}}
  $("#avatar").textContent=(p.name||"?")[0].toUpperCase();
- $("#name").textContent=p.name||"Configura tu nombre";$("#email").textContent=p.email||"en Ajustes";
- $("#horario").innerHTML='🕘 Mi horario <b>'+s.entrada+'–'+fin+(comida?' +'+(comida%60?comida+"m":comida/60):'')+'</b>';
+ $("#name").textContent=p.name||"Configura tu nombre";$("#email").textContent=p.email?"avisos a "+p.email:"email de avisos en Ajustes";
+ $("#horario").innerHTML='🕘 Hoy <b>'+(h&&s.workdays.includes(wd)?h.entrada+'–'+h.salida+(h.pausa?' · comida '+h.pausa:''):'libre')+'</b>';
+ $("#dry").style.display=b.dryRun?"":"none";
  const ses=$("#sesion");ses.className="chip "+cls;ses.innerHTML='<span class="dot"></span> Sesión Bizneo <b>'+txt+'</b>';
 }
 const HEADER_HTML='<header class="top"><div class="top-in"><div class="avatar" id="avatar">·</div><div class="who"><b id="name">…</b><span id="email"></span></div><div class="sp"></div>'+
- '<a class="chip" id="horario" href="/me/ajustes#horario">…</a><a class="chip" id="sesion" href="/me/ajustes#bizneo">…</a>'+
+ '<span class="chip warn" id="dry" style="display:none">🧪 <b>Modo prueba</b></span><a class="chip" id="horario" href="/me/ajustes#horario">…</a><a class="chip" id="sesion" href="/me/ajustes#bizneo">…</a>'+
  '<a class="link" id="navlink" href="/me/ajustes">Ajustes</a><a class="link" href="/logout">Cerrar sesión</a></div></header>';
 document.body.insertAdjacentHTML("afterbegin",HEADER_HTML);
 `;
@@ -153,35 +156,37 @@ export const dashboardPage = () => page("Fichaje Bizneo", `
     <section class="card"><div class="card-h"><h2>Esta semana</h2><small id="weekTotal"></small></div><ul class="week" id="week"></ul></section>
     <section class="card"><div class="card-h"><h2>Calendario</h2>
       <div class="cal-nav"><button id="prev" aria-label="Mes anterior">‹</button><b id="monthName"></b><button id="next" aria-label="Mes siguiente">›</button></div></div>
-      <div class="card-b"><p class="cal-help">Toca un <b>día futuro</b> para alternar dónde trabajas: 🏢 oficina → 🏠 casa → 🌴 libre. Volver al modo habitual quita la excepción.</p>
+      <div class="card-b"><p class="cal-help">Toca un <b>día futuro</b> para alternar: 🏢 oficina → 🏠 casa → 🌴 libre. Los festivos y vacaciones de Bizneo se saltan solos; 🌴 es para días libres que no estén en Bizneo.</p>
       <div class="cal" id="cal"></div>
-      <div class="legend"><span>🏢 oficina: entrada manual, resto automático</span><span>🏠 casa: todo automático</span><span>🌴 libre: no se ficha</span><span>borde azul = elegido a mano</span></div></div>
+      <div class="legend"><span>🏢 oficina (presencial)</span><span>🏠 casa (teletrabajo)</span><span>🌴 libre: no se ficha</span><span>borde azul = elegido a mano</span></div></div>
     </section>
   </div>
 
   <section class="card"><div class="card-h"><h2>Actividad</h2><small>últimos fichajes y avisos</small></div><ul class="log" id="log"></ul></section>
 </main>`, `
 const ICON={oficina:"🏢",casa:"🏠",libre:"🌴",auto:""};
-const LABEL={entrada:"Entrada",pausa:"Pausa",retorno:"Retorno",salida:"Salida"};
+const LABEL={entrada:"Iniciar",pausa:"Pausar",retorno:"Reanudar",salida:"Finalizar"};
 const DOW=["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
 const MONTHS=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 let S=null,month=null,loadedAt=0;
 
 async function load(){try{S=await api("/api/state"+(month?"?month="+month:""));loadedAt=Date.now();month=S.month;render()}catch(e){if(e.message!=="auth")toast(e.message)}}
 async function act(path,body,okMsg){try{await api(path,body);if(okMsg)toast(okMsg)}catch(e){toast("⚠ "+e.message)}await load()}
+async function actMsg(path,body){try{const r=await api(path,body);toast(r.msg||"Hecho")}catch(e){toast("⚠ "+e.message)}await load()}
 
 function render(){
  const t=S.today,s=S.config.schedule;header(S.config);
- const stTxt={"en curso":"En curso",pausa:"En pausa",terminada:"Jornada terminada",pendiente:"Pendiente de entrada",libre:"Día libre"}[t.status];
+ const stTxt={"en curso":"En curso",pausa:"En pausa",terminada:"Jornada terminada",pendiente:"Pendiente de iniciar",libre:"Día libre"}[t.status];
  $("#state").className="state "+t.status.replace(" ","-");$("#stateTxt").textContent=stTxt;
- $("#modeBadge").textContent={oficina:"Modo manual",casa:"Modo automático",libre:"Día libre"}[t.mode]+(t.override!=="auto"?" ·":"");
+ $("#modeBadge").textContent={oficina:"🏢 Oficina",casa:"🏠 Teletrabajo",libre:"🌴 Día libre"}[t.mode]+(t.override!=="auto"?" ·":"");
  $("#modeBadge").disabled=!!t.actual.entrada;
- const comida=s.comida?toMin(s.retorno)-toMin(s.pausa):0;
- $("#todayInfo").textContent="Entrada "+s.entrada+(s.comida?" · comida "+s.pausa+"–"+s.retorno:"");
- const steps=s.comida?["entrada","pausa","retorno","salida"]:["entrada","salida"];
+ const p=t.plan||{};
+ $("#todayInfo").textContent=p.entrada?"Plan: "+p.entrada+(p.pausa?" · comida "+p.pausa+"–"+p.retorno:"")+" · fin "+p.salida:"";
+ const steps=["entrada","pausa","retorno","salida"].filter(k=>p[k]);
  $("#steps").className="steps n"+steps.length;
  $("#steps").innerHTML=steps.map(k=>{const a=t.actual[k],p=t.plan&&t.plan[k];
-  return '<div class="step '+(a?"done":t.next===k?"next":"")+'"><label>'+LABEL[k]+'</label><span>'+(a?a:p?"≈ "+p:"—")+'</span></div>'}).join("");
+  const sk=t.skipped[k];
+  return '<div class="step '+(a?"done":t.next===k?"next":"")+'"'+(sk?' title="'+esc(sk)+'"':'')+'><label>'+LABEL[k]+'</label><span>'+(a?a+(t.simulated[k]?" 🧪":""):sk?"omitido":p?"≈ "+p:"—")+'</span></div>'}).join("");
  renderToday();renderWeek();renderCal();renderLog();tickTimer();
 }
 
@@ -190,8 +195,8 @@ function tickTimer(){if(!S)return;const t=S.today,a=t.actualIso||{};
  if(running)ms+=Date.now()-loadedAt;
  const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60;
  $("#timer").textContent=[h,m,x].map(n=>String(n).padStart(2,"0")).join(":");
- const goal=S.config.schedule.objetivoMin*60000,pct=Math.min(100,Math.floor(ms/goal*100));
- $("#sub").textContent=pct+"% · objetivo "+fmtHM(S.config.schedule.objetivoMin);$("#bar").style.width=pct+"%";
+ const goal=(t.goalMin||1)*60000,pct=Math.min(100,Math.floor(ms/goal*100));
+ $("#sub").textContent=t.goalMin?pct+"% · objetivo "+fmtHM(t.goalMin):"";$("#bar").style.width=(t.goalMin?pct:0)+"%";
 }
 setInterval(tickTimer,1000);
 
@@ -201,16 +206,17 @@ function renderToday(){
  const row=(icon,cls,title,text)=>'<div class="row"><div class="check '+cls+'">'+icon+'</div><div class="msg"><b>'+title+'</b><p>'+text+'</p></div></div>';
  const now=new Date();const hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
  const markForm=step=>'<span class="hint">¿Ya fichaste en Bizneo?</span><input type="time" id="markTime" value="'+hm+'"><button class="btn" data-act="mark" data-step="'+step+'">Registrar '+LABEL[step].toLowerCase()+'</button>';
- if(t.status==="libre"){h+=row("🌴","off","Hoy es día libre","No se fichará nada. Si al final trabajas, cambia el modo con el botón de arriba.")}
- else if(t.status==="pendiente"&&t.mode==="oficina"){h+=row("🏢","wait","Ficha la entrada al llegar a la oficina","Cuando entres, el resto (comida y salida) se ficha solo. Salida prevista ≈ "+t.plan.salida+".")+
-   '<div class="actions"><button class="btn primary" data-act="punch" data-step="entrada">Fichar entrada ahora</button>'+markForm("entrada")+'</div>'}
- else if(t.status==="pendiente"){h+=row("⏳","wait","La entrada se fichará sola a las ≈ "+t.plan.entrada,"Después se ficharán la comida y la salida (≈ "+t.plan.salida+"). No tienes que hacer nada.")+
-   '<div class="actions"><button class="btn primary" data-act="punch" data-step="entrada">Fichar entrada ya</button><button class="btn" data-act="replan">Otra hora al azar</button>'+markForm("entrada")+'</div>'}
- else if(t.status==="pausa"){h+=row("☕","wait","En pausa desde las "+t.actual.pausa,"El retorno se fichará solo a las ≈ "+t.plan.retorno+".")+
-   '<div class="actions"><button class="btn primary" data-act="punch" data-step="retorno">Volver ahora</button></div>'}
- else if(t.status==="en curso"){h+=row("✓","","Entrada fichada a las "+t.actual.entrada,"Ya no tienes que hacer nada más: "+(t.next==="pausa"?"la comida y la salida se fichan solas.":"la salida se ficha sola a las ≈ "+t.plan.salida+"."))+
-   '<div class="sep"></div><a href="#" data-act="finish">¿Te vas antes? Terminar la jornada ahora</a>'+(t.next==="pausa"?' &nbsp;·&nbsp; <a href="#" data-act="punch" data-step="pausa">Salir a comer ya</a>':"")}
- else if(t.status==="terminada"){h+=row("✓","","Jornada terminada a las "+(t.actual.salida||"—"),"Has trabajado "+fmtHM(Math.round(t.workedMs/60000))+". ¡Hasta mañana!")+
+ if(S.config.bizneo.dryRun)h+='<div class="err-banner" style="background:var(--warnbg);border-color:#fde68a;color:#92400e"><span>🧪 <b>Modo prueba</b>: se comprueba todo pero no se envía nada a Bizneo. Desactívalo en <a href="/me/ajustes#bizneo">Ajustes</a> cuando el registro cuadre.</span></div>';
+ if(t.status==="libre"){h+=row("🌴","off","Hoy no se ficha",t.offReason?"Bizneo marca hoy como "+esc(t.offReason)+".":"Día libre. Si al final trabajas, cambia el modo con el botón de arriba.")}
+ else if(t.status==="pendiente"&&t.skipped.entrada){h+=row("!","err","No se ha iniciado la jornada",esc(t.skipped.entrada))+
+   '<div class="actions"><button class="btn primary" data-act="punch" data-step="entrada">Iniciar ahora</button>'+markForm("entrada")+'</div>'}
+ else if(t.status==="pendiente"){h+=row("⏳","wait","Se iniciará sola a las ≈ "+t.plan.entrada,(t.plan.pausa?"Pausa ≈ "+t.plan.pausa+", reanudar ≈ "+t.plan.retorno+" y finalizar ≈ ":"Finalizar ≈ ")+t.plan.salida+". Antes de cada paso se comprueba en Bizneo que no esté ya hecho.")+
+   '<div class="actions"><button class="btn primary" data-act="punch" data-step="entrada">Iniciar ya</button><button class="btn" data-act="replan">Otro desfase al azar</button>'+markForm("entrada")+'</div>'}
+ else if(t.status==="pausa"){h+=row("☕","wait","En pausa desde las "+t.actual.pausa,"Se reanudará sola a las ≈ "+t.plan.retorno+".")+
+   '<div class="actions"><button class="btn primary" data-act="punch" data-step="retorno">Reanudar ahora</button></div>'}
+ else if(t.status==="en curso"){h+=row("✓","","Iniciada a las "+t.actual.entrada,"No tienes que hacer nada más: "+(t.next==="pausa"?"la pausa de comida (≈ "+t.plan.pausa+") y el final (≈ "+t.plan.salida+") se fichan solos.":"se finalizará sola a las ≈ "+t.plan.salida+"."))+
+   '<div class="sep"></div><a href="#" data-act="finish">¿Te vas antes? Finalizar ahora</a>'+(t.next==="pausa"?' &nbsp;·&nbsp; <a href="#" data-act="punch" data-step="pausa">Pausar para comer ya</a>':"")}
+ else if(t.status==="terminada"){h+=row("✓","","Jornada finalizada a las "+(t.actual.salida||"—"),"Has trabajado "+fmtHM(Math.round(t.workedMs/60000))+". ¡Hasta mañana!")+
    '<div class="sep"></div><a href="#" data-act="unmark" data-step="salida">Deshacer la salida en el panel</a>'}
  el.innerHTML=h;
 }
@@ -218,10 +224,10 @@ function renderToday(){
 function renderWeek(){let tot=0;
  $("#week").innerHTML=S.week.map((d,i)=>{const today=d.date===S.today.date;tot+=d.workedMs||0;
   const dd=new Date(d.date+"T12:00:00Z"),label=dd.getUTCDate()+" "+MONTHS[dd.getUTCMonth()].slice(0,3).toLowerCase();
-  const a=d.actual||{},p=d.plan||{};const cell=k=>a[k]?"<b>"+a[k]+"</b>":(d.date>=S.today.date&&p[k]&&d.mode!=="libre"?"≈"+p[k]:"--:--");
+  const a=d.actual||{},p=d.plan||{};const cell=k=>a[k]?"<b>"+a[k]+"</b>":(d.skipped&&d.skipped[k])?"omitido":(d.date>=S.today.date&&p[k]&&d.mode!=="libre"?"≈"+p[k]:"--:--");
   const st=d.status==="sin datos"?"—":d.status;
   return '<li class="'+(today?"today":"")+'"><div class="wd"><b>'+DOW[i]+'</b> '+(ICON[d.mode]||"")+(today?'<span class="tag">HOY</span>':"")+'<small>'+label+'</small></div>'+
-   '<div class="times">'+(d.mode==="libre"?"día libre":["entrada","pausa","retorno","salida"].map(cell).join(" · "))+'</div><div class="st '+st.replace(" ","-")+'">'+esc(st)+'</div></li>'}).join("");
+   '<div class="times">'+(d.mode==="libre"?(d.offReason||"día libre"):["entrada","pausa","retorno","salida"].filter(k=>p[k]||a[k]).map(cell).join(" · "))+'</div><div class="st '+st.replace(" ","-")+'">'+esc(st)+'</div></li>'}).join("");
  $("#weekTotal").textContent=tot?fmtHM(Math.round(tot/60000))+" trabajadas":"";
 }
 
@@ -238,15 +244,15 @@ function renderLog(){$("#log").innerHTML=S.log.length?S.log.map(l=>{const d=new 
  return '<li><time>'+d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})+'</time><span class="'+l.type+'">'+({ok:"✓",error:"✗",warn:"!",info:"•"}[l.type]||"•")+'</span><span>'+esc(l.msg)+(l.source==="auto"?' <span class="hint">(automático)</span>':"")+'</span></li>'}).join(""):'<li class="hint">Sin actividad todavía.</li>'}
 
 document.addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(b){e.preventDefault();const a=b.dataset.act,step=b.dataset.step;b.disabled=true;
- if(a==="punch"||a==="retry")act("/api/punch",{step},LABEL[step]+" fichada en Bizneo");
- else if(a==="finish"){if(confirm("¿Fichar la salida ahora en Bizneo?"))act("/api/finish",{},"Jornada terminada");else b.disabled=false}
+ if(a==="punch"||a==="retry")actMsg("/api/punch",{step});
+ else if(a==="finish"){if(confirm("¿Finalizar ahora la jornada en Bizneo?"))actMsg("/api/finish",{});else b.disabled=false}
  else if(a==="mark")act("/api/mark",{step,time:$("#markTime").value},"Registrado");
  else if(a==="unmark")act("/api/unmark",{step},"Deshecho en el panel (Bizneo no se modifica)");
  else if(a==="replan")act("/api/replan",{},"Nueva hora de entrada");return}
  const d=e.target.closest(".cal .d");if(d&&!d.disabled)act("/api/calendar",{date:d.dataset.date});
 });
 $("#modeBadge").onclick=()=>act("/api/today-mode",{});
-$("#syncBtn").onclick=async e=>{e.target.disabled=true;await act("/api/sync",{},"Sesión de Bizneo válida");e.target.disabled=false};
+$("#syncBtn").onclick=async e=>{e.target.disabled=true;await actMsg("/api/sync",{});e.target.disabled=false};
 $("#prev").onclick=()=>{const[y,m]=month.split("-").map(Number);const d=new Date(Date.UTC(y,m-2,1));month=d.toISOString().slice(0,7);load()};
 $("#next").onclick=()=>{const[y,m]=month.split("-").map(Number);const d=new Date(Date.UTC(y,m,1));month=d.toISOString().slice(0,7);load()};
 load();setInterval(load,60000);
@@ -254,43 +260,35 @@ load();setInterval(load,60000);
 
 export const settingsPage = () => page("Ajustes · Fichaje Bizneo", `
 <main style="max-width:980px">
-  <section class="card" id="perfil"><div class="card-h"><h2>Perfil</h2></div><div class="card-b form">
-    <div class="fields"><label><span>Nombre</span><input type="text" id="p_name"></label><label><span>Email</span><input type="email" id="p_email"></label></div>
+  <section class="card" id="perfil"><div class="card-h"><h2>Perfil y avisos</h2><small id="mailInfo"></small></div><div class="card-b form">
+    <div class="fields"><label><span>Nombre</span><input type="text" id="p_name"></label>
+      <label><span>Email para avisos</span><input type="email" id="p_email"></label>
+      <label><span>Avisar cuando falten (días)</span><input type="number" id="a_days" min="0" max="30"><small class="hint">para que caduque la cookie</small></label></div>
+    <p class="hint">Se avisa por correo si falla un fichaje, si un paso no se hace (por ejemplo, el cronómetro no estaba como se esperaba), si la sesión caduca y antes de que caduque la cookie.</p>
+    <div class="actions"><button class="btn" id="mailBtn">Enviar correo de prueba</button></div>
   </div></section>
 
   <section class="card" id="horario"><div class="card-h"><h2>Horario</h2><small>zona horaria Europe/Madrid</small></div><div class="card-b form">
-    <div class="fields">
-      <label><span>Entrada</span><input type="time" id="s_entrada"></label>
-      <label><span>Salida a comer</span><input type="time" id="s_pausa"></label>
-      <label><span>Vuelta de comer</span><input type="time" id="s_retorno"></label>
-      <label><span>Objetivo diario (min)</span><input type="number" id="s_objetivo" min="60" max="720"><small class="hint" id="objHint"></small></label>
-      <label><span>Variación entrada (± min)</span><input type="number" id="s_jitter" min="0" max="60"><small class="hint">la hora real de entrada se elige al azar dentro de este margen</small></label>
-      <label><span>Fichar comida</span><select id="s_comida"><option value="1">Sí, pausa y retorno</option><option value="0">No (jornada continua)</option></select></label>
-    </div>
-    <div><span style="font-weight:500">Modo por defecto de cada día</span><div class="fields" id="defModes" style="margin-top:8px"></div>
-    <p class="hint">🏢 oficina: tú fichas la entrada (en Bizneo o en este panel) y el resto es automático · 🏠 casa: todo automático · 🌴 libre: no se ficha. El calendario del panel permite cambiar días concretos.</p></div>
+    <div style="overflow-x:auto"><table class="sched"><thead><tr><th>Día</th><th>Modo</th><th>Iniciar</th><th>Pausar</th><th>Reanudar</th><th>Finalizar</th><th>Objetivo</th></tr></thead><tbody id="days"></tbody></table></div>
+    <p class="hint">Deja <b>Pausar</b> y <b>Reanudar</b> vacíos para jornada continua. 🏢 oficina = presencial · 🏠 casa = teletrabajo (es la opción del cronómetro de Bizneo) · 🌴 libre = no se ficha.</p>
+    <div class="fields"><label><span>Desfase aleatorio (0 a N min)</span><input type="number" id="s_jitter" min="0" max="30">
+      <small class="hint">el mismo para iniciar y finalizar (la jornada dura lo mismo); la comida tiene el suyo</small></label></div>
   </div></section>
 
   <section class="card" id="bizneo"><div class="card-h"><h2>Sesión de Bizneo</h2><small id="sesInfo"></small></div><div class="card-b form">
     <label><span>URL de tu Bizneo</span><input type="text" id="b_base" placeholder="https://tuempresa.bizneohr.com"></label>
-    <label><span>Cookie de sesión</span><textarea id="b_cookie" placeholder="Pega aquí el valor de la cabecera Cookie (déjalo vacío para conservar la actual)"></textarea>
-      <small class="hint">Se guarda sólo en tu Worker (KV). Nunca se muestra de vuelta.</small></label>
-    <div class="fields"><label><span>Caduca el</span><input type="date" id="b_exp"></label>
-      <label><span>Página para el token CSRF</span><input type="text" id="b_csrf" placeholder="/"></label></div>
-    <div class="actions"><button class="btn" id="testBtn">Probar sesión</button><button class="btn danger" id="clearBtn">Borrar cookie</button></div>
-  </div></section>
-
-  <section class="card" id="peticiones"><div class="card-h"><h2>Peticiones de fichaje</h2><small>las que hace Bizneo al pulsar sus botones</small></div><div class="card-b form">
-    <div id="acts" style="display:grid;gap:12px"></div>
-    <div class="fields"><label><span>URL de estado (opcional)</span><input type="text" id="b_status" placeholder="/api/..."></label>
-      <label><span>Campo JSON "trabajando" (opcional)</span><input type="text" id="b_path" placeholder="data.clocked_in"></label></div>
-    <p class="hint">En URL y cuerpo puedes usar <code>{{iso}}</code> <code>{{timestamp}}</code> <code>{{date}}</code> <code>{{time}}</code> <code>{{mode}}</code> (office/remote).</p>
-    <details><summary style="cursor:pointer;font-weight:500">Cómo capturar estas peticiones</summary><ol class="howto" style="margin-top:10px">
-      <li>Abre Bizneo en Chrome con tu usuario y pulsa <b>F12 → Network</b> (marca <i>Preserve log</i>).</li>
-      <li>Pulsa el botón de fichar en Bizneo (entrada). Aparecerá una petición <b>POST</b> nueva.</li>
-      <li>Copia su <b>Request URL</b> y el <b>Payload</b> (vista <i>view source</i>) en "Entrada".</li>
-      <li>En esa misma petición, en <i>Request Headers</i>, copia el valor completo de <b>cookie</b> y pégalo arriba.</li>
-      <li>Repite para pausa, retorno y salida (puedes hacerlo otro día o anular el fichaje después en Bizneo).</li>
+    <label><span>Cookies de sesión</span><textarea id="b_cookie" placeholder="_hcmex_key=SFMyNTY…; device_id=…   (déjalo vacío para conservar la actual)"></textarea>
+      <small class="hint">Sólo se guarda si Bizneo la acepta. Se guarda en tu Worker (KV) y nunca se muestra de vuelta. Si Bizneo la renueva, se actualiza sola.</small></label>
+    <div class="fields"><label><span>Caduca el</span><input type="date" id="b_exp"><small class="hint">se rellena solo si Bizneo indica la fecha</small></label>
+      <label><span>Modo</span><select id="b_dry"><option value="1">🧪 Prueba (no envía nada)</option><option value="0">✅ Real (ficha en Bizneo)</option></select></label>
+      <label><span>Opción de pausa</span><input type="text" id="b_pause" placeholder="Comida"><small class="hint">texto de la opción del desplegable "Pausar"</small></label></div>
+    <div class="actions"><button class="btn" id="testBtn">Guardar y diagnosticar</button><button class="btn danger" id="clearBtn">Borrar cookie</button></div>
+    <pre id="diag" class="diag" hidden></pre>
+    <details><summary style="cursor:pointer;font-weight:500">Cómo copiar las cookies</summary><ol class="howto" style="margin-top:10px">
+      <li>Entra en Bizneo con tu usuario en Chrome o Edge.</li>
+      <li>Pulsa <b>F12 → Application → Cookies →</b> la dirección de tu Bizneo.</li>
+      <li>Copia el valor de <code>_hcmex_key</code> y de <code>device_id</code> (doble clic en <i>Value</i>).</li>
+      <li>Pégalos aquí así: <code>_hcmex_key=VALOR; device_id=VALOR</code></li>
     </ol></details>
   </div></section>
 
@@ -299,28 +297,38 @@ export const settingsPage = () => page("Ajustes · Fichaje Bizneo", `
 const DOW=["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
 let C;
 $("#navlink").textContent="Panel";$("#navlink").href="/me/dashboard";
+const goal=(e,s,p,r)=>{if(!e||!s)return"—";let m=toMin(s)-toMin(e);if(p&&r)m-=toMin(r)-toMin(p);return m>0?fmtHM(m):"—"};
+function rowGoal(tr){const v=k=>$("[data-k="+k+"]",tr).value;$(".goal",tr).textContent=goal(v("entrada"),v("salida"),v("pausa"),v("retorno"))}
 async function load(){const st=await api("/api/state");C=st.config;header(C);const s=C.schedule,b=C.bizneo;
- $("#p_name").value=C.profile.name;$("#p_email").value=C.profile.email;
- $("#s_entrada").value=s.entrada;$("#s_pausa").value=s.pausa;$("#s_retorno").value=s.retorno;$("#s_objetivo").value=s.objetivoMin;$("#s_jitter").value=s.jitterMin;$("#s_comida").value=s.comida?"1":"0";
- objHint();
- $("#defModes").innerHTML=DOW.map((d,i)=>{const n=i+1,v=s.workdays.includes(n)?(s.defaultModes[n]||"casa"):"libre";
-  return '<label><span>'+d+'</span><select data-wd="'+n+'">'+["oficina","casa","libre"].map(o=>'<option'+(o===v?" selected":"")+'>'+o+'</option>').join("")+'</select></label>'}).join("");
- $("#b_base").value=b.baseUrl;$("#b_csrf").value=b.csrfPage;$("#b_status").value=b.statusUrl;$("#b_path").value=b.workingJsonPath;
+ $("#p_name").value=C.profile.name;$("#p_email").value=C.profile.email;$("#a_days").value=C.alerts.daysBefore;
+ $("#mailInfo").textContent=C.mail?"Resend configurado":"falta el secreto RESEND_API_KEY";
+ $("#s_jitter").value=s.jitterMin;
+ $("#days").innerHTML=DOW.map((d,i)=>{const n=i+1,h=s.days[n]||{},m=s.workdays.includes(n)?(s.defaultModes[n]||"casa"):"libre";
+  const t=k=>'<td><input type="time" data-k="'+k+'" value="'+esc(h[k]||"")+'"></td>';
+  return '<tr data-wd="'+n+'"><td><b>'+d+'</b></td><td><select data-k="mode">'+[["oficina","🏢 oficina"],["casa","🏠 casa"],["libre","🌴 libre"]].map(([v,l])=>'<option value="'+v+'"'+(v===m?" selected":"")+'>'+l+'</option>').join("")+'</select></td>'+
+   t("entrada")+t("pausa")+t("retorno")+t("salida")+'<td class="goal hint"></td></tr>'}).join("");
+ document.querySelectorAll("#days tr").forEach(tr=>{rowGoal(tr);tr.oninput=()=>rowGoal(tr)});
+ $("#b_base").value=b.baseUrl;$("#b_dry").value=b.dryRun?"1":"0";$("#b_pause").value=b.pauseLabel||"";
  $("#b_exp").value=b.cookieExpiresAt?b.cookieExpiresAt.slice(0,10):"";
  $("#sesInfo").textContent=b.hasCookie?("cookie guardada"+(b.cookieSavedAt?" el "+new Date(b.cookieSavedAt).toLocaleDateString("es-ES"):"")):"sin cookie";
- $("#acts").innerHTML=["entrada","pausa","retorno","salida"].map(k=>{const a=b.actions[k];
-  return '<div class="act" data-k="'+k+'"><div class="act-h"><b>'+k[0].toUpperCase()+k.slice(1)+'</b><select class="m">'+["POST","PUT","PATCH","GET"].map(o=>'<option'+(o===a.method?" selected":"")+'>'+o+'</option>').join("")+'</select><input type="text" class="u" placeholder="/ruta/que/usa/bizneo" value="'+esc(a.url)+'"></div><textarea class="bd" placeholder="Cuerpo (JSON o form-urlencoded), opcional">'+esc(a.body)+'</textarea></div>'}).join("");
 }
-function objHint(){const v=+$("#s_objetivo").value||0;$("#objHint").textContent=Math.floor(v/60)+"h "+String(v%60).padStart(2,"0")+"m de trabajo efectivo"}
-$("#s_objetivo").oninput=objHint;
-function collect(){const wd=[...document.querySelectorAll("[data-wd]")];const dm={};const work=[];
- wd.forEach(s=>{if(s.value!=="libre"){work.push(+s.dataset.wd);dm[s.dataset.wd]=s.value}});
- const actions={};document.querySelectorAll(".act").forEach(el=>actions[el.dataset.k]={method:$(".m",el).value,url:$(".u",el).value,body:$(".bd",el).value});
- return{profile:{name:$("#p_name").value,email:$("#p_email").value},
-  schedule:{entrada:$("#s_entrada").value,pausa:$("#s_pausa").value,retorno:$("#s_retorno").value,objetivoMin:+$("#s_objetivo").value,jitterMin:+$("#s_jitter").value,comida:$("#s_comida").value==="1",workdays:work,defaultModes:dm},
-  bizneo:{baseUrl:$("#b_base").value,cookie:$("#b_cookie").value,cookieExpiresAt:$("#b_exp").value||null,csrfPage:$("#b_csrf").value,statusUrl:$("#b_status").value,workingJsonPath:$("#b_path").value,actions}}}
-$("#saveBtn").onclick=async()=>{try{await api("/api/config",collect());$("#b_cookie").value="";toast("Guardado");load()}catch(e){toast("⚠ "+e.message)}};
-$("#testBtn").onclick=async()=>{try{await api("/api/config",collect());$("#b_cookie").value="";await api("/api/test-action",{});toast("✓ La sesión de Bizneo funciona");load()}catch(e){toast("⚠ "+e.message)}};
+function collect(){const days={},modes={};
+ document.querySelectorAll("#days tr").forEach(tr=>{const n=tr.dataset.wd,v=k=>$("[data-k="+k+"]",tr).value;
+  modes[n]=v("mode");if(v("entrada")&&v("salida"))days[n]={entrada:v("entrada"),salida:v("salida"),pausa:v("pausa"),retorno:v("retorno")};
+  else if(v("mode")!=="libre")throw new Error(DOW[n-1]+": faltan las horas de iniciar y finalizar")});
+ return{profile:{name:$("#p_name").value,email:$("#p_email").value},alerts:{daysBefore:+$("#a_days").value},
+  schedule:{jitterMin:+$("#s_jitter").value,days,defaultModes:modes},
+  bizneo:{baseUrl:$("#b_base").value,cookie:$("#b_cookie").value,cookieExpiresAt:$("#b_exp").value||null,dryRun:$("#b_dry").value==="1",pauseLabel:$("#b_pause").value}}}
+async function save(){await api("/api/config",collect());$("#b_cookie").value=""}
+$("#saveBtn").onclick=async()=>{try{await save();toast("Guardado");load()}catch(e){toast("⚠ "+e.message)}};
+$("#testBtn").onclick=async e=>{e.target.disabled=true;const out=$("#diag");out.hidden=false;out.textContent="Comprobando…";
+ try{await save();const d=await api("/api/test-action",{});
+  out.textContent=["✓ Sesión válida","Cronómetro: "+d.stateTxt+(d.startedAt?" desde "+new Date(d.startedAt).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}):""),
+   "Registrado hoy: "+(d.registeredMin!=null?fmtHM(d.registeredMin):"?"),"Petición del botón: "+d.request,"Token CSRF: "+(d.csrf?"encontrado":"NO encontrado"),
+   "Opciones oficina/casa: "+(d.kinds.join(", ")||"—"),"Opciones de pausa: "+(d.pauses.join(" | ")||"(sólo aparecen con el cronómetro en marcha)"),
+   "Hoy en el calendario: "+(d.today?d.today.classes.join(" ")+(d.today.off?" → NO se ficha":" → laborable"):"NO encontrado (no se ficharía)")].join("\\n");
+  load()}catch(err){out.textContent="✗ "+err.message}e.target.disabled=false};
+$("#mailBtn").onclick=async()=>{try{await save();await api("/api/test-mail",{});toast("Correo enviado: revisa tu bandeja")}catch(e){toast("⚠ "+e.message)}};
 $("#clearBtn").onclick=async()=>{if(!confirm("¿Borrar la cookie de Bizneo guardada?"))return;await api("/api/config",{bizneo:{clearCookie:true}});toast("Cookie borrada");load()};
 load().then(()=>{if(location.hash)document.querySelector(location.hash)?.scrollIntoView()});
 `);

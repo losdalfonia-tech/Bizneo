@@ -4,45 +4,56 @@
 export const STEPS = ["entrada", "pausa", "retorno", "salida"];
 export const MODES = ["oficina", "casa", "libre", "auto"]; // orden del ciclo en el calendario
 
+// Valor del selector 🏢/🏠 del cronómetro de Bizneo según el modo del día.
+export const KIND = { oficina: "working_time", casa: "telework" };
+
+// Minutos de margen: pasado este tiempo desde la hora prevista, no se ficha a destiempo.
+export const WINDOW_MIN = 60;
+
+const LJ = { entrada: "09:00", salida: "18:15", pausa: "14:30", retorno: "15:30" };
+
 export const DEFAULT_CONFIG = {
-  profile: { name: "", email: "" },
+  profile: { name: "", email: "" }, // email = a dónde se envían los avisos
   schedule: {
-    entrada: "09:00",
-    pausa: "14:30",
-    retorno: "15:30",
-    objetivoMin: 495, // 8h 15m de trabajo efectivo
-    jitterMin: 15, // la entrada se adelanta/retrasa al azar hasta ±15 min
-    comida: true, // fichar pausa y retorno
-    workdays: [1, 2, 3, 4, 5], // 1 = lunes ... 7 = domingo
-    // Modo por defecto de cada día laborable cuando el calendario dice "auto"
-    defaultModes: { 1: "oficina", 2: "oficina", 3: "oficina", 4: "casa", 5: "casa" },
-    // En modo oficina, la entrada es manual. Si a esta hora no has fichado, no se hace nada ese día.
+    jitterMin: 5, // desfase aleatorio de 0 a N min (mismo en entrada y salida)
+    // Horario por día de la semana (1 = lunes ... 7 = domingo). Sin pausa/retorno = jornada continua.
+    days: {
+      1: { ...LJ }, 2: { ...LJ }, 3: { ...LJ }, 4: { ...LJ },
+      5: { entrada: "08:00", salida: "15:00", pausa: "", retorno: "" },
+    },
+    workdays: [1, 2, 3, 4, 5],
+    // 🏢 oficina = presencial (working_time) · 🏠 casa = teletrabajo (telework)
+    defaultModes: { 1: "oficina", 2: "oficina", 3: "casa", 4: "casa", 5: "casa" },
   },
   bizneo: {
-    baseUrl: "https://TUEMPRESA.bizneohr.com",
+    baseUrl: "https://fractalia.bizneohr.com",
     cookie: "",
     cookieSavedAt: null,
     cookieExpiresAt: null,
-    csrfPage: "/", // página de la que se extrae <meta name="csrf-token">
-    statusUrl: "", // opcional: endpoint para comprobar la sesión / estado
-    workingJsonPath: "", // opcional: ruta en el JSON del estado que indica si estás trabajando (p.ej. "data.clocked_in")
-    actions: {
-      entrada: { method: "POST", url: "", body: "" },
-      pausa: { method: "POST", url: "", body: "" },
-      retorno: { method: "POST", url: "", body: "" },
-      salida: { method: "POST", url: "", body: "" },
-    },
+    dryRun: true, // modo prueba: comprueba todo pero no envía nada a Bizneo
+    pauseLabel: "Comida", // opción del desplegable "Pausar"
   },
+  alerts: { daysBefore: 5 }, // aviso por correo cuando queden N días para que caduque la cookie
 };
+
+const HHMM = /^\d{2}:\d{2}$/;
 
 export function mergeConfig(saved) {
   const c = structuredClone(DEFAULT_CONFIG);
   if (!saved) return c;
   Object.assign(c.profile, saved.profile || {});
-  Object.assign(c.schedule, saved.schedule || {});
+  const s = saved.schedule || {};
+  if (Number.isFinite(s.jitterMin)) c.schedule.jitterMin = s.jitterMin;
+  if (Array.isArray(s.workdays)) c.schedule.workdays = s.workdays;
+  if (s.defaultModes) Object.assign(c.schedule.defaultModes, s.defaultModes);
+  if (s.days) {
+    for (const [wd, h] of Object.entries(s.days)) {
+      if (h && HHMM.test(h.entrada || "") && HHMM.test(h.salida || "")) c.schedule.days[wd] = { pausa: "", retorno: "", ...h };
+    }
+  }
   const b = saved.bizneo || {};
-  Object.assign(c.bizneo, { ...b, actions: c.bizneo.actions });
-  for (const s of STEPS) Object.assign(c.bizneo.actions[s], (b.actions || {})[s] || {});
+  for (const k of Object.keys(c.bizneo)) if (b[k] !== undefined) c.bizneo[k] = b[k];
+  Object.assign(c.alerts, saved.alerts || {});
   return c;
 }
 
@@ -65,6 +76,17 @@ export function localParts(date, tz = "Europe/Madrid") {
   };
 }
 
+// "2026-11-16 10:57:57" en hora de Madrid → ISO UTC
+export function zonedToIso(local, tz = "Europe/Madrid") {
+  const m = String(local || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  const asUtc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  const p = localParts(new Date(asUtc), tz);
+  const [y, mo, d] = p.date.split("-").map(Number);
+  const offset = Date.UTC(y, mo - 1, d, p.hh, p.mm, p.ss) - asUtc;
+  return new Date(asUtc - offset).toISOString();
+}
+
 export const toMin = (hhmm) => {
   const [h, m] = String(hhmm).split(":").map(Number);
   return h * 60 + m;
@@ -73,7 +95,7 @@ export const fromMin = (min) => {
   const m = ((Math.round(min) % 1440) + 1440) % 1440;
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 };
-export const fmtLocal = (iso, tz) => {
+export const fmtLocal = (iso, tz = "Europe/Madrid") => {
   if (!iso) return null;
   const p = localParts(new Date(iso), tz);
   return fromMin(p.minutes);
@@ -84,11 +106,21 @@ export function weekdayOf(dateStr) {
   return d === 0 ? 7 : d;
 }
 
+export const dayHours = (schedule, wd) => schedule.days?.[wd] || schedule.days?.[String(wd)] || null;
+export const hasLunch = (h) => Boolean(h && HHMM.test(h.pausa || "") && HHMM.test(h.retorno || ""));
+
+// Minutos de trabajo efectivo de un horario (sin la comida).
+export function goalMin(h) {
+  if (!h) return 0;
+  const lunch = hasLunch(h) ? toMin(h.retorno) - toMin(h.pausa) : 0;
+  return toMin(h.salida) - toMin(h.entrada) - lunch;
+}
+
 // Modo efectivo de un día: lo que diga el calendario o, si es "auto", el de por defecto.
 export function effectiveMode(dateStr, overrideMode, schedule) {
   const wd = weekdayOf(dateStr);
   if (overrideMode && overrideMode !== "auto") return overrideMode;
-  if (!schedule.workdays.includes(wd)) return "libre";
+  if (!schedule.workdays.includes(wd) || !dayHours(schedule, wd)) return "libre";
   return schedule.defaultModes[wd] || "casa";
 }
 
@@ -100,38 +132,57 @@ export function randomInt(min, max) {
   return min + (a[0] % (max - min + 1));
 }
 
-// Plan de un día. Si ya hay entrada real, el resto se recalcula a partir de ella.
-export function buildPlan(schedule, entradaRealMin = null, jitter = null) {
-  const j = jitter ?? randomInt(-schedule.jitterMin, schedule.jitterMin);
-  const entrada = entradaRealMin ?? toMin(schedule.entrada) + j;
-  const comidaMin = schedule.comida ? toMin(schedule.retorno) - toMin(schedule.pausa) : 0;
-  // pequeña variación (0–4 min) para que pausa/retorno no sean siempre exactos
-  const pausa = toMin(schedule.pausa) + (jitter === null ? randomInt(0, 4) : 0);
-  const retorno = pausa + comidaMin;
-  const salida = entrada + schedule.objetivoMin + comidaMin;
-  const plan = { entrada: fromMin(entrada), salida: fromMin(salida) };
-  if (schedule.comida) Object.assign(plan, { pausa: fromMin(pausa), retorno: fromMin(retorno) });
+// Plan de un día: entrada y salida con el mismo desfase (la jornada dura lo mismo);
+// la comida tiene su propio desfase, igual en la salida y en la vuelta (siempre dura lo mismo).
+export function buildPlan(hours, jitterMin = 5, rnd = randomInt) {
+  if (!hours) return {};
+  const j = rnd(0, jitterMin);
+  const jl = rnd(0, jitterMin);
+  const plan = { entrada: fromMin(toMin(hours.entrada) + j), salida: fromMin(toMin(hours.salida) + j) };
+  if (hasLunch(hours)) {
+    plan.pausa = fromMin(toMin(hours.pausa) + jl);
+    plan.retorno = fromMin(toMin(hours.retorno) + jl);
+  }
   return plan;
 }
 
-// Siguiente paso pendiente según lo ya fichado.
-export function nextStep(day, schedule) {
-  const done = day.actual || {};
-  const order = schedule.comida ? STEPS : ["entrada", "salida"];
-  return order.find((s) => !done[s]) || null;
+// Salida a partir de lo fichado de verdad: entrada real + duración de la jornada,
+// corrigiendo si la comida real fue más larga o más corta de lo previsto.
+export function recalcSalida(hours, actual, tz = "Europe/Madrid") {
+  if (!hours || !actual?.entrada) return null;
+  let dur = toMin(hours.salida) - toMin(hours.entrada);
+  if (hasLunch(hours) && actual.pausa && actual.retorno) {
+    const real = Math.round((Date.parse(actual.retorno) - Date.parse(actual.pausa)) / 60000);
+    dur += real - (toMin(hours.retorno) - toMin(hours.pausa));
+  }
+  return fromMin(toMin(fmtLocal(actual.entrada, tz)) + dur);
 }
 
-// Decide si en este minuto toca fichar algo. Devuelve el paso o null.
-export function dueStep(day, schedule, nowMin) {
+export const stepsOf = (plan) => STEPS.filter((s) => plan?.[s]);
+const handled = (day, s) => Boolean(day.actual?.[s] || day.skipped?.[s]);
+
+// Siguiente paso pendiente según lo ya fichado u omitido.
+export function nextStep(day) {
+  return stepsOf(day.plan).find((s) => !handled(day, s)) || null;
+}
+
+// Decide si en este minuto toca fichar algo. Devuelve el último paso cuya hora ya ha
+// llegado y que no se ha hecho, siempre que no hayan pasado más de WINDOW_MIN minutos.
+// (Si un paso anterior se quedó sin hacer, no se ficha con retraso: se pasa al siguiente.)
+export function dueStep(day, nowMin, windowMin = WINDOW_MIN) {
   if (day.mode === "libre" || day.finished) return null;
-  const step = nextStep(day, schedule);
-  if (!step) return null;
-  if (step === "entrada" && day.mode === "oficina") return null; // entrada manual
-  const at = day.plan?.[step];
-  if (!at) return null;
-  // margen: si han pasado más de 3 h del plan, no fichamos a destiempo (p.ej. worker caído)
-  if (nowMin >= toMin(at) && nowMin - toMin(at) < 180) return step;
-  return null;
+  let due = null;
+  for (const s of stepsOf(day.plan)) {
+    if (!handled(day, s) && nowMin >= toMin(day.plan[s])) due = s;
+  }
+  if (!due || nowMin - toMin(day.plan[due]) >= windowMin) return null;
+  return due;
+}
+
+// Pasos anteriores a `step` que se quedaron sin hacer.
+export function missedBefore(day, step) {
+  const order = stepsOf(day.plan);
+  return order.slice(0, order.indexOf(step)).filter((s) => !handled(day, s));
 }
 
 // Minutos trabajados a partir de los fichajes reales.
