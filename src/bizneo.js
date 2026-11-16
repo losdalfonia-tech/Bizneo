@@ -227,6 +227,50 @@ export class Session {
     if (res.status >= 300) throw new BizneoError(`Bizneo redirige la portada a ${res.headers.get("location")}`, "http");
     return body;
   }
+
+  // Petición de un fragmento como la haría htmx desde la portada.
+  async fragment(path) {
+    const { res, body } = await this.request(path, {
+      headers: {
+        accept: "text/html, */*", "hx-request": "true", "hx-current-url": this.base + "/",
+        "hx-target": "chronometer-wrapper", referer: this.base + "/",
+      },
+    });
+    if (res.status >= 300) throw new BizneoError(`Bizneo respondió ${res.status} al cargar ${path}`, "http");
+    return body;
+  }
+
+  /** Portada + cronómetro. La portada trae el cronómetro vacío y lo carga aparte (hx-get … hub_chrono). */
+  async load() {
+    const home = await this.home();
+    let chrono = parseChrono(home);
+    if (chrono.state === "unknown") {
+      const url = lazyChronoUrl(home);
+      if (url) {
+        this.chronoUrl = url;
+        chrono = parseChrono(await this.fragment(url));
+      }
+    }
+    return { home, chrono };
+  }
+
+  /** Sólo el cronómetro (para verificar tras una acción). */
+  async chrono() {
+    if (this.chronoUrl) return parseChrono(await this.fragment(this.chronoUrl));
+    return (await this.load()).chrono;
+  }
+}
+
+// Ruta con la que la portada carga el cronómetro, p. ej. /chrono/123/hub_chrono
+export function lazyChronoUrl(html) {
+  let fallback = null;
+  for (const m of (html || "").matchAll(/<[\w-]+\b[^>]*\bhx-get=[^>]*>/gi)) {
+    const a = attrsOf(m[0]);
+    if (!/^\/chrono\//.test(a["hx-get"] || "")) continue;
+    if (a.id === "chronometer-wrapper" || /hub_chrono/.test(a["hx-get"])) return a["hx-get"];
+    fallback ||= a["hx-get"];
+  }
+  return fallback;
 }
 
 // ---------------- acciones ----------------
@@ -277,8 +321,7 @@ export async function chronoAction(cfg, step, opts = {}) {
   const dryRun = opts.dryRun ?? cfg.dryRun;
   const result = (outcome, msg, extra = {}) => ({ outcome, msg, cookie: session.cookie, sessionExpires: session.sessionExpires, ...extra });
 
-  const html = await session.home();
-  const c = parseChrono(html);
+  const { home: html, chrono: c } = await session.load();
   if (c.state === "unknown") throw new BizneoError(c.reason || "No reconozco el estado del cronómetro", "parse");
 
   // ¿Ya está hecho?
@@ -342,14 +385,14 @@ export async function chronoAction(cfg, step, opts = {}) {
   let cur = c;
   if (preResume) {
     await send(session, cur, cur.buttons.resume, {});
-    cur = parseChrono(await session.home());
+    cur = await session.chrono();
     if (!cur.buttons.stop) throw new BizneoError("Tras reanudar no aparece el botón Finalizar", "verify");
     submitter = cur.buttons.stop;
   }
   await send(session, cur, submitter, overrides);
 
   // Verificación
-  const after = parseChrono(await session.home());
+  const after = await session.chrono();
   if (after.state !== TARGET[step]) {
     throw new BizneoError(`Bizneo no ha cambiado el estado: el cronómetro sigue ${STATE_TXT[after.state]}`, "verify");
   }
@@ -377,8 +420,7 @@ export function pageHints(html, status) {
 /** Diagnóstico sin fichar: estado del cronómetro, opciones y cómo ve Bizneo el día. */
 export async function diagnose(cfg, date) {
   const session = new Session(cfg, cfg.fetchImpl);
-  const html = await session.home();
-  const c = parseChrono(html);
+  const { home: html, chrono: c } = await session.load();
   const info = parseCalendar(html)[date] || null;
   return {
     ok: c.state !== "unknown",
@@ -394,6 +436,7 @@ export async function diagnose(cfg, date) {
     cookie: session.cookie,
     sessionExpires: session.sessionExpires,
     reason: c.reason,
+    lazyUrl: session.chronoUrl || null,
     hints: c.state === "unknown" ? pageHints(html, session.lastStatus) : undefined,
   };
 }
@@ -401,6 +444,6 @@ export async function diagnose(cfg, date) {
 /** Comprueba sólo que la sesión es válida. */
 export async function checkSession(cfg) {
   const session = new Session(cfg, cfg.fetchImpl);
-  const html = await session.home();
-  return { ok: true, chrono: parseChrono(html).state, cookie: session.cookie, sessionExpires: session.sessionExpires };
+  await session.home();
+  return { ok: true, cookie: session.cookie, sessionExpires: session.sessionExpires };
 }

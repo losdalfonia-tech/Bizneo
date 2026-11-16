@@ -199,3 +199,27 @@ test("diagnóstico y renovación de cookie", async () => {
   assert.equal(d.cookie, "_hcmex_key=NEW; device_id=dev");
   assert.ok(d.sessionExpires);
 });
+
+// ---------- Bizneo real: el cronómetro se carga aparte ----------
+
+test("portada con cronómetro diferido: lo pide a /chrono/<id>/hub_chrono", async () => {
+  const f = fakeBizneo({ lazy: true });
+  const home = await (await f.fetch("https://empresa.bizneohr.com/")).text();
+  assert.equal(parseChrono(home).state, "unknown");
+  f.calls.length = 0;
+  const d = await diagnose(cfg(f), "2026-11-16");
+  assert.equal(d.state, "stopped");
+  assert.equal(d.lazyUrl, "/chrono/1000/hub_chrono");
+  const frag = f.calls.find((c) => c.path === "/chrono/1000/hub_chrono");
+  assert.equal(frag.headers["hx-request"], "true");
+  assert.deepEqual(d.today, { classes: ["day", "today"], off: null });
+});
+
+test("día completo de acciones con cronómetro diferido", async () => {
+  const f = fakeBizneo({ lazy: true });
+  for (const [step, outcome] of [["entrada", "done"], ["entrada", "already"], ["pausa", "done"], ["retorno", "done"], ["salida", "done"], ["salida", "already"]]) {
+    assert.equal((await chronoAction(cfg(f), step, MON)).outcome, outcome, step);
+  }
+  assert.equal(f.writes().length, 4);
+  assert.equal(f.state, "stopped");
+});

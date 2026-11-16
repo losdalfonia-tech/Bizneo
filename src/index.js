@@ -3,7 +3,7 @@ import {
   buildPlan, dueStep, nextStep, missedBefore, workedMs, dayStatus, weekdayOf, dayHours,
   hasLunch, goalMin, recalcSalida,
 } from "./schedule.js";
-import { chronoAction, diagnose, checkSession, BizneoError, Session, parseChrono, offLabel, pageHints } from "./bizneo.js";
+import { chronoAction, diagnose, checkSession, BizneoError, Session, offLabel, pageHints } from "./bizneo.js";
 import { sendMail, notifyOnce } from "./notify.js";
 import { loginPage, dashboardPage, settingsPage } from "./ui.js";
 
@@ -390,8 +390,8 @@ async function handle(req, env) {
       let st;
       try {
         const s = new Session(clientCfg(cfg, env), env.__fetch);
-        const page = await s.home();
-        st = parseChrono(page);
+        const { home: page, chrono } = await s.load();
+        st = chrono;
         await persistCookie(env, { cookie: s.cookie, sessionExpires: s.sessionExpires });
         if (st.state === "unknown") {
           await kv.put(env, "debug:last", { at: new Date().toISOString(), hints: pageHints(page, s.lastStatus) }, 60 * 60 * 24 * 7);

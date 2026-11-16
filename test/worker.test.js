@@ -82,3 +82,10 @@ test("modo prueba: un día entero sin escribir nada en Bizneo", async () => {
   assert.ok(day.simulated.entrada);
   assert.ok(log.some((l) => /habría enviado POST \/chrono/.test(l.msg)));
 });
+
+test("lunes completo con el cronómetro diferido (como el Bizneo real)", async () => {
+  const f = fakeBizneo({ lazy: true });
+  const { day } = await runDay("2026-11-16", f);
+  assert.equal(f.writes().length, 4);
+  assert.ok(day.finished);
+});
