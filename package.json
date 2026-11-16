@@ -1,0 +1,15 @@
+{
+  "name": "bizneo-fichaje-automatico",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Panel y fichaje automático de la cuenta personal de Bizneo HR (Cloudflare Worker)",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

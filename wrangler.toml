@@ -1,0 +1,21 @@
+name = "bizneo-fichaje"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Estado (configuración, sesión de Bizneo, días y registro de eventos)
+# Crea el namespace con:  npx wrangler kv namespace create STATE
+# y pega aquí el id que te devuelva.
+[[kv_namespaces]]
+binding = "STATE"
+id = "REEMPLAZAR_CON_TU_KV_ID"
+
+[vars]
+TZ = "Europe/Madrid"
+
+# El cron revisa cada minuto si toca fichar (entrada, pausa, retorno o salida).
+[triggers]
+crons = ["* * * * *"]
+
+# Secretos (NO van en este fichero):
+#   npx wrangler secret put APP_PASSWORD     -> contraseña para entrar al panel
+#   npx wrangler secret put SESSION_SECRET   -> cadena aleatoria larga para firmar la cookie del panel
